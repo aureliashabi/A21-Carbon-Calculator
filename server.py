@@ -46,6 +46,7 @@ def _iata_from_unlocode(code: str):
 def _geocode_google(query: str):
     """Use Google Geocoding API as fallback"""
     api_key = os.environ.get('GOOGLE_GEOCODING_API_KEY')
+    api_key = "AIzaSyCvfHroH8D7tRPwqwpalBF9rPPNfklcqqA"
     if not api_key:
         logger.warning("Google Geocoding API key not found in environment variables")
         return None
@@ -343,12 +344,6 @@ def generate_fallback_analysis(shipment: Dict) -> str:
     # Final delivery
     analysis += f"Final Delivery (Truck): {shipment['destination']} airport → {shipment['delivery_to']}\n\n"
     
-    # Connecting airports
-    if len(shipment['sectors']) > 1:
-        connecting_airports = [sector['from'] for sector in shipment['sectors'][1:]]
-        analysis += f"Connecting Airports: {', '.join(connecting_airports)}\n\n"
-    else:
-        analysis += "Connecting Airports: None\n\n"
     
     # Additional notes
     analysis += "Additional Notes:\n"
@@ -356,6 +351,66 @@ def generate_fallback_analysis(shipment: Dict) -> str:
     analysis += "- Please verify flight details with the carrier\n"
     
     return analysis
+
+# === Scope 1 Emission Factors (Tank-to-Wheel) ===
+EF_TABLE = {
+    "road": {  # kg CO2 per tonne-km
+        "heavy_full": 0.05,
+        "heavy_avg": 0.08,
+        "medium": 0.20,
+        "light": 0.40
+    },
+    "air": {   # kg CO2 per tonne-km
+        "freighter_long": 0.50,
+        "belly_long": 0.77,
+        "freighter_short": 1.20,
+        "belly_short": 0.98
+    }
+}
+SHORT_HAUL_MAX_KM = 1500  # threshold for short-haul air
+
+def get_emission_factor(mode: str, subtype: str, distance_km: float) -> float:
+    """Select EF by mode, subtype, and (for air) distance band."""
+    if mode == "TRUCK":
+        return EF_TABLE["road"].get(subtype, EF_TABLE["road"]["heavy_avg"])
+    elif mode == "AIR":
+        if distance_km is None:
+            distance_km = 0
+        if distance_km <= SHORT_HAUL_MAX_KM:
+            return EF_TABLE["air"]["freighter_short"] if subtype == "freighter" else EF_TABLE["air"]["belly_short"]
+        else:
+            return EF_TABLE["air"]["freighter_long"] if subtype == "freighter" else EF_TABLE["air"]["belly_long"]
+    return 0.0
+
+def calculate_shipment_emissions(
+    shipment: Dict,
+    weight_kg: float,
+    road_subtype: str = "heavy_avg",
+    air_subtype: str = "belly"
+) -> Dict:
+    """Calculate Scope 1 emissions for a single shipment JSON."""
+    weight_t = (weight_kg or 0) / 1000.0
+    total = 0.0
+    results = []
+    for s in shipment.get("sectors", []):
+        dist = s.get("distance_km") or 0.0
+        subtype = road_subtype if s.get("mode") == "TRUCK" else air_subtype
+        ef = get_emission_factor(s.get("mode"), subtype, dist)
+        emissions = weight_t * dist * ef
+        total += emissions
+        results.append({**s, "emission_factor": ef, "emissions_kg": emissions})
+    return {
+        "ref_no": shipment.get("ref_no"),
+        "total_emissions_kg": total,
+        "by_sector": results
+    }
+
+# ----- Pydantic models for endpoints -----
+class EmissionRequest(BaseModel):
+    shipments: List[Dict]
+    weight_kg: float
+    road_subtype: Optional[str] = "heavy_avg"  # heavy_full | heavy_avg | medium | light
+    air_subtype: Optional[str] = "belly"       # belly | freighter
 
 @app.post("/extract")
 def extract_info(req: PromptRequest):
@@ -397,7 +452,6 @@ INSTRUCTIONS:
 2. Use the exact format specified below
 3. For LAND transport: Identify if it's pickup from origin address to origin airport or delivery from destination airport to final address
 4. For AIR transport: Note the flight numbers and airports
-5. Identify any connecting airports where cargo changes planes
 
 Return your response in the following EXACT format for each shipment:
 
@@ -411,8 +465,6 @@ Flight Leg [number] (Air): [from airport code] → [to airport code] via Flight 
 
 Final Delivery (Truck): [destination airport code] airport → [final destination address]
 
-Connecting Airports: [List any connecting airports, or "None" if direct]
-
 Additional Notes:
 [Any additional relevant information]
 
@@ -420,7 +472,6 @@ IMPORTANT:
 - Follow this exact format with the exact headings
 - Include ALL legs including land transport for pickup and delivery
 - Be specific about flight numbers and airport codes
-- Clearly identify any connecting airports
 - Use the exact airport codes from the data (e.g., SGSIN, KRICN, etc.)
 - Do not include dates in the response unless specifically asked
 - Keep your response concise and to the point"""
@@ -428,7 +479,7 @@ IMPORTANT:
     full_prompt = f"{system_prompt}\n\n{llm_input}"
     
     logger.info("Calling LLM for transport analysis...")
-    raw_output = call_llm(full_prompt, timeout=20)  # Reduced timeout
+    raw_output = call_llm(full_prompt, timeout=40)  # Increase timeout
     
     if not raw_output:
         logger.warning("LLM returned empty response")
@@ -493,6 +544,20 @@ def debug_parse(req: PromptRequest):
         "raw_parsing_debug": raw_parsed,
         "input_sample": req.text[:200] + "..." if len(req.text) > 200 else req.text
     }
+
+@app.post("/calculate")
+def calculate_emissions(req: EmissionRequest):
+    results = []
+    for shipment in req.shipments:
+        results.append(
+            calculate_shipment_emissions(
+                shipment,
+                req.weight_kg,
+                road_subtype=req.road_subtype or "heavy_avg",
+                air_subtype=req.air_subtype or "belly",
+            )
+        )
+    return {"results": results}
 
 if __name__ == "__main__":
     import uvicorn
