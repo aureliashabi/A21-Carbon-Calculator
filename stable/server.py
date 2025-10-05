@@ -14,13 +14,6 @@ import os
 import csv
 from io import StringIO
 
-from typing import Any, Dict, Optional
-import pandas as pd
-from fastapi import UploadFile, File
-
-from excel_to_records import read_manifest_to_records
-from insights import make_insights_from_comparison
-
 # --- Geo helpers (uses geopy with Google Geocoding fallback) ---
 try:
     from geopy.distance import geodesic
@@ -85,7 +78,7 @@ def _geocode_google(query: str):
             'address': query,
             'key': api_key
         }
-        response = requests.get(url, params=params, timeout=30)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
         
         if data['status'] == 'OK' and data['results']:
@@ -103,7 +96,7 @@ def _geocode_query(query: str):
     if Nominatim is not None:
         try:
             geocoder = Nominatim(user_agent="logistics-parser/1.0")
-            loc = geocoder.geocode(query, timeout=30)
+            loc = geocoder.geocode(query, timeout=10)
             # Tiny delay to avoid hammering the service if many sectors
             time.sleep(1/3)
             if loc:
@@ -230,7 +223,7 @@ def enrich_addresses_with_llm(locations: List[str]) -> Dict[str, str]:
         "}\n\n"
         "Locations:\n" + "\n".join(locations)
     )
-    raw = call_llm(prompt, timeout=80)
+    raw = call_llm(prompt, timeout=40)
     try:
         mapping = json.loads(raw)
         for loc in locations:
@@ -412,7 +405,7 @@ def parse_logistics_data(text: str) -> List[Dict]:
     
     return shipments
 
-def call_llm(prompt: str, timeout: int = 60) -> str:
+def call_llm(prompt: str, timeout: int = 30) -> str:
     """Call the LLM with proper error handling and timeout"""
     try:
         response = requests.post(
@@ -625,7 +618,7 @@ IMPORTANT:
     full_prompt = f"{system_prompt}\n\n{llm_input}"
     
     logger.info("Calling LLM for multi-modal transport analysis...")
-    raw_output = call_llm(full_prompt, timeout=80)
+    raw_output = call_llm(full_prompt, timeout=40)
     
     if not raw_output:
         logger.warning("LLM returned empty response")
@@ -713,37 +706,6 @@ def calculate_emissions(req: EmissionRequest):
             "sea_subtype": req.sea_subtype
         }
     }
-
-# Automate Feeding of data
-@app.post("/manifest/ingest")
-async def manifest_ingest(file: UploadFile = File(...), sheet: Optional[str] = None):
-    """
-    Excel (July-style) -> normalized records (no EF/emissions).
-    """
-    content = await file.read()
-    payload = read_manifest_to_records(content, sheet=sheet)
-    return payload   # {'records', 'count', 'warnings', 'errors'}
-
-@app.post("/manifest/insights")
-async def manifest_insights(payload: Dict[str, Any], top_n: int = 10, min_pct_saving: float = 0.0):
-    """
-    comparison_table (from your calculator) -> portfolio + text/json insights.
-    Body: {"comparison_table": [ ... rows with required columns ... ]}
-    """
-    table = payload.get("comparison_table") or []
-    comp_df = pd.DataFrame(table)
-    out = make_insights_from_comparison(comp_df, top_n=top_n, min_pct_saving=min_pct_saving)
-    return {
-        "portfolio_summary": out["portfolio_summary"],
-        "insights_text": out["insights_text"],
-        "insights_json": out["insights_json"],
-        "top_opportunities_rows": (
-            None if out["top_opportunities"].empty else out["top_opportunities"].to_dict(orient="records")
-        ),
-    }
-
-
-
 
 if __name__ == "__main__":
     import uvicorn

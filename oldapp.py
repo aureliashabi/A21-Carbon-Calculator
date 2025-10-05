@@ -31,92 +31,6 @@ hide_streamlit_style = """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # ---------------------
-# Helper Functions
-# ---------------------
-def _format_date(raw_date):
-    """Convert date from '2025-07-03' to '3/7/2025' format"""
-    if not raw_date or str(raw_date).lower() == 'nan':
-        return ""
-    
-    try:
-        # Handle pandas Timestamp and string dates
-        if hasattr(raw_date, 'strftime'):
-            # It's a date object
-            return raw_date.strftime("%d/%m/%Y")
-        else:
-            # It's a string, try to parse
-            date_str = str(raw_date).split()[0]  # Take only date part
-            from datetime import datetime
-            if '-' in date_str:
-                # Assume YYYY-MM-DD format
-                dt = datetime.strptime(date_str, "%Y-%m-%d")
-                return dt.strftime("%d/%m/%Y")
-            else:
-                # Already in correct format or unknown
-                return date_str
-    except Exception as e:
-        print(f"Date formatting error: {e}")
-        return str(raw_date).split()[0] if raw_date else ""
-
-def _clean_value(value):
-    """Convert 'nan' to empty string and handle other pandas missing values"""
-    if not value or str(value).lower() in ['nan', 'nat', 'none', 'null']:
-        return ""
-    return str(value)
-
-def _compose_prefill_lines(records: list[dict]) -> str:
-    lines = []
-    for i, r in enumerate(records, 1):
-        # Extract basic info
-        ref = r.get('reference', '')
-        origin = r.get('origin', '')
-        destination = r.get('destination', '')
-        notes = r.get('notes', '').strip()
-        
-        # Clean notes - remove existing quotes and clean whitespace
-        notes = notes.replace('"', '').replace("'", "")
-        # Replace multiple whitespace but preserve the multi-line structure for addresses
-        import re
-        # Only replace multiple spaces/tabs with single space, keep newlines
-        notes = re.sub(r'[ \t]+', ' ', notes)
-        
-        # Build the base columns
-        parts = [
-            str(i),      # Sequence number
-            ref,         # Reference
-            "NO PICKUP", # Pickup From  
-            origin,      # Origin
-            destination, # Destination
-            f'"{notes}"' # Delivery To (in quotes)
-        ]
-        
-        # For AIR shipments, add sector information
-        if ref.startswith("A"):
-            segs = r.get("segments", [])
-            for seg in segs:
-                # Fix date format from "2025-07-03" to "3/7/2025"
-                raw_date = seg.get("flight_date", "")
-                formatted_date = _format_date(raw_date)
-                
-                # Get other fields and replace "nan" with empty string
-                flight_number = _clean_value(seg.get("flight_number", ""))
-                segment_from = _clean_value(seg.get("from", ""))
-                segment_to = _clean_value(seg.get("to", ""))
-                
-                parts.extend([
-                    formatted_date,
-                    flight_number,
-                    segment_from,
-                    segment_to
-                ])
-        
-        # Join with tabs - use empty strings instead of "nan"
-        line = "\t".join(parts)
-        lines.append(line)
-    
-    return "\n".join(lines)
-
-# ---------------------
 # Sidebar - API Status
 # ---------------------
 st.sidebar.header("🔧 Application Status")
@@ -147,81 +61,15 @@ else:
     st.sidebar.error(status_msg)
 
 # ---------------------
-# Session state otherwise it will bug, idk why lol
-# ---------------------
-if "prompt_text" not in st.session_state:
-    st.session_state.prompt_text = ""         
-if "last_parsed_excel" not in st.session_state:
-    st.session_state.last_parsed_excel = None 
-if "insights_out" not in st.session_state:
-    st.session_state.insights_out = None     
-
-# ---------------------
 # Main Application
 # ---------------------
+
 col1, col2 = st.columns([3, 1])
 
 with col1:
-
-    # ---------------------
-    # ZF Excel Upload Section START
-    st.subheader("Upload Excel or Enter Shipment Detail Manually")
-    excel_file = st.file_uploader("Drop your Excel here", type=["xlsx","xls"], key="manifest_file")
-
-    # ✅ BUTTON #1: Add Excel (parse & prefill)
-    if st.button("📥 Add Excel (parse & prefill)", use_container_width=True, disabled=(excel_file is None)):
-        if excel_file is None:
-            st.warning("Please choose an Excel file first.")
-        else:
-            try:
-                excel_bytes = excel_file.read()
-                parsed = read_manifest_to_records(excel_bytes, sheet=None)
-                st.session_state.last_parsed_excel = parsed
-
-                recs = parsed.get("records", [])
-                if recs:
-                    st.session_state.prompt_text = _compose_prefill_lines(recs)
-                    # Don't set parsed_shipments here - let LLM handle the parsing
-                    if "parsed_shipments" in st.session_state:
-                        del st.session_state.parsed_shipments
-                    if "emissions_result" in st.session_state:
-                        del st.session_state.emissions_result
-                    st.success("✅ Excel parsed and textarea prefilled.")
-                else:
-                    st.warning("Parsed successfully but found 0 records.")
-            except Exception as e:
-                st.error(f"Failed to parse Excel: {e}")
-
-    # Show parse summary/preview if available
-    if st.session_state.last_parsed_excel:
-        parsed = st.session_state.last_parsed_excel
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Rows parsed", parsed.get("count", 0))
-
-        recs = parsed.get("records", [])
-        if recs:
-            df_preview = pd.DataFrame([{
-                "Ref": r.get("reference"),
-                "Origin": r.get("origin"),
-                "Destination": r.get("destination"),
-                "Sectors": " | ".join(
-                    f"{s.get('from','')}->{s.get('to','')}"
-                    for s in (r.get("segments") or [])
-                    if s.get('from') and s.get('to')
-                ),
-                "Notes": r.get("notes",""),
-            } for r in recs])
-            st.dataframe(df_preview, use_container_width=True, hide_index=True)
-
-    # ---------------------
-    # ZF Excel Upload Section END
-
-    # Bind the main textarea to session state so prefill works
     user_input = st.text_area(
-        "Enter shipment details:",
-        height=200,
-        placeholder="Paste your logistics data here...",
-        key="prompt_text"  
+        "Enter shipment details:", height=200, 
+        placeholder="Paste your logistics data here..."
     )
     
     if st.button("🚢 Send to LLM", type="primary", use_container_width=True):
@@ -258,47 +106,42 @@ with col1:
                     st.error(f"Unexpected error: {str(e)}")
                     st.session_state.llm_error = str(e)
 
-# ---------------------
-# Insights panel with a button
-# ---------------------
-# st.subheader("2) Insights (paste your calculator's comparison_table)")
+st.subheader("2) Insights (paste your calculator's comparison_table)")
 
-# comp_json_text = st.text_area(
-#     "Paste JSON with comparison_table here",
-#     placeholder='{"comparison_table":[{"reference":"R1","baseline_mode":"air","baseline_kg":264,"alt_scenario":"alt_road","alt_mode":"road","alt_kg":97,"delta_kg":-167,"delta_pct":-63.3}]}',
-#     height=160,
-#     key="comp_json"
-# )
+comp_json_text = st.text_area(
+    "Paste JSON with comparison_table here",
+    placeholder='{"comparison_table":[{"reference":"R1","baseline_mode":"air","baseline_kg":264,"alt_scenario":"alt_road","alt_mode":"road","alt_kg":97,"delta_kg":-167,"delta_pct":-63.3}]}',
+    height=160,
+    key="comp_json"
+)
 
-# # ✅ BUTTON #2: Generate Insights
-# if st.button("✨ Generate Insights", use_container_width=True, disabled=(not comp_json_text.strip())):
-#     try:
-#         payload = json.loads(comp_json_text)
-#         comparison_table = payload.get("comparison_table") or payload
-#         out = make_insights_from_comparison(comparison_table, top_n=10, min_pct_saving=0.0)
-#         st.session_state.insights_out = out
-#         st.success("✅ Insights generated.")
-#     except Exception as e:
-#         st.session_state.insights_out = None
-#         st.error(f"Could not generate insights: {e}")
+comparison_table = None
+if comp_json_text.strip():
+    try:
+        payload = json.loads(comp_json_text)
+        comparison_table = payload.get("comparison_table") or payload
+    except Exception as e:
+        st.error(f"Invalid JSON: {e}")
 
-# # Show insights if generated
-# if st.session_state.insights_out:
-#     out = st.session_state.insights_out
-#     ps = out["portfolio_summary"]
-#     c1, c2, c3 = st.columns(3)
-#     c1.metric("Baseline total (kg CO₂e)", f"{ps['total_baseline_kg']:,.3f}")
-#     c2.metric("Best-case total (kg CO₂e)", f"{ps['total_bestcase_kg']:,.3f}")
-#     c3.metric("Portfolio Δ", f"{ps['portfolio_delta_kg']:,.3f}", f"{ps['portfolio_delta_pct']:.1f}%")
+if comparison_table:
+    try:
+        out = make_insights_from_comparison(comparison_table, top_n=10, min_pct_saving=0.0)
+        ps = out["portfolio_summary"]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Baseline total (kg CO₂e)", f"{ps['total_baseline_kg']:,.3f}")
+        c2.metric("Best-case total (kg CO₂e)", f"{ps['total_bestcase_kg']:,.3f}")
+        c3.metric("Portfolio Δ", f"{ps['portfolio_delta_kg']:,.3f}", f"{ps['portfolio_delta_pct']:.1f}%")
 
-#     st.markdown("Insights")
-#     for line in out["insights_text"]:
-#         st.write("•", line)
+        st.markdown("Insights")
+        for line in out["insights_text"]:
+            st.write("•", line)
 
-#     tops = out["top_opportunities"]
-#     if isinstance(tops, pd.DataFrame) and not tops.empty:
-#         st.markdown("Top opportunities")
-#         st.dataframe(tops, use_container_width=True, hide_index=True)
+        tops = out["top_opportunities"]
+        if isinstance(tops, pd.DataFrame) and not tops.empty:
+            st.markdown("Top opportunities")
+            st.dataframe(tops, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(str(e))
 
 # ---------------------
 # Display parsed shipments
@@ -481,68 +324,21 @@ if "emissions_result" in st.session_state:
         mime="application/pdf"
     )
 
-    #st.subheader("Raw JSON Output")
-    #st.json(emissions_result)
+    st.subheader("Raw JSON Output")
+    st.json(emissions_result)
 
-    # ---------------------
-    # Insights panel with a button
-    # ---------------------
-    st.subheader("Insights (paste your calculator's comparison_table)")
-
-    comp_json_text = st.text_area(
-        "Paste JSON with comparison_table here",
-        placeholder='{"comparison_table":[{"reference":"R1","baseline_mode":"air","baseline_kg":264,"alt_scenario":"alt_road","alt_mode":"road","alt_kg":97,"delta_kg":-167,"delta_pct":-63.3}]}',
-        height=160,
-        key="comp_json"
-    )
-
-    # Generate Insights
-    if st.button("✨ Generate Insights", use_container_width=True, disabled=(not comp_json_text.strip())):
-        try:
-            payload = json.loads(comp_json_text)
-            comparison_table = payload.get("comparison_table") or payload
-            out = make_insights_from_comparison(comparison_table, top_n=10, min_pct_saving=0.0)
-            st.session_state.insights_out = out
-            st.success("✅ Insights generated.")
-        except Exception as e:
-            st.session_state.insights_out = None
-            st.error(f"Could not generate insights: {e}")
-
-    # Show insights if generated
-    if st.session_state.insights_out:
-        out = st.session_state.insights_out
-        ps = out["portfolio_summary"]
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Baseline total (kg CO₂e)", f"{ps['total_baseline_kg']:,.3f}")
-        c2.metric("Best-case total (kg CO₂e)", f"{ps['total_bestcase_kg']:,.3f}")
-        c3.metric("Portfolio Δ", f"{ps['portfolio_delta_kg']:,.3f}", f"{ps['portfolio_delta_pct']:.1f}%")
-
-        st.markdown("Insights")
-        for line in out["insights_text"]:
-            st.write("•", line)
-
-        tops = out["top_opportunities"]
-        if isinstance(tops, pd.DataFrame) and not tops.empty:
-            st.markdown("Top opportunities")
-            st.dataframe(tops, use_container_width=True, hide_index=True)
-
-
-
-# # ---------------------
-# # LLM Analysis
-# # ---------------------
-# if "llm_analysis" in st.session_state and st.session_state.llm_analysis:
-#     st.subheader("🤖 LLM Analysis")
-#     st.text_area("Analysis Result", st.session_state.llm_analysis, height=300)
+# ---------------------
+# LLM Analysis
+# ---------------------
+if "llm_analysis" in st.session_state and st.session_state.llm_analysis:
+    st.subheader("🤖 LLM Analysis")
+    st.text_area("Analysis Result", st.session_state.llm_analysis, height=300)
 
 # ---------------------
 # Sidebar - Clear Data & Footer
 # ---------------------
 if st.sidebar.button("🗑️ Clear All Data", type="secondary"):
-    for key in [
-        'parsed_shipments', 'llm_analysis', 'emissions_result', 'llm_error',
-        'prompt_text', 'last_parsed_excel', 'insights_out', 'comp_json'
-    ]:
+    for key in ['parsed_shipments', 'llm_analysis', 'emissions_result', 'llm_error']:
         if key in st.session_state:
             del st.session_state[key]
     st.rerun()
@@ -566,9 +362,8 @@ st.sidebar.markdown(footer_html, unsafe_allow_html=True)
 
 st.sidebar.info("""
 **Instructions:**
-1. Click **Add Excel (parse & prefill)** to ingest your manifest and prefill the textarea
-2. OR paste logistics data in the text area
-3. Click 'Send to LLM' to calculate emissions
-4. Adjust emission inputs as needed and click 'Calculate Scope 1 Emissions'
-5. Paste calculator 'comparison_table' JSON and click **Generate Insights**
+1. Paste logistics data in the text area
+2. Click 'Send to LLM' to calculate emissions
+3. Adjust emission inputs as needed
+4. Click 'Calculate Scope 1 Emissions'
 """)

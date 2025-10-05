@@ -22,8 +22,8 @@ ollama run llama3.1:8b-instruct-q8_0
 
 (Dependencies)
 
-- pip install streamlit requests geopy pandas fastapi uvicorn googlemaps 
-- python -m pip install streamlit requests geopy pandas fastapi uvicorn googlemaps
+- pip install streamlit requests geopy pandas fastapi uvicorn googlemaps reportlab openpyxl python-multipart
+- python -m pip install streamlit requests geopy pandas fastapi uvicorn googlemaps reportlab  openpyxl python-multipart
 
 (Cloning from Github)
 
