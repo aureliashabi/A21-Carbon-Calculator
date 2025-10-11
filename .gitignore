@@ -1,14 +1,8 @@
 # Ignore Archive folder
 Archive/
+stable/
 
-# Ignore Excel files
 *.xlsx
-
-# Ignore PowerPoint files
 *.pptx
+*.docx
 
-# Ignore any other non-Python/TXT/BAT files (optional catch-all)
-# *.*
-# !*.py
-# !*.txt
-# !*.bat

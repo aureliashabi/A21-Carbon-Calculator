@@ -1,11 +1,12 @@
 import streamlit as st
 import requests
 import re
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 import io
+from io import BytesIO
 import json
 import pandas as pd
 from excel_to_records import read_manifest_to_records
@@ -383,6 +384,26 @@ def create_emission_pdf(emissions_result):
     h2 = styles['Heading2']
 
     elements = []
+
+    ## Darius Edit
+
+    image_url = "https://alex.world/wp-content/uploads/2002/10/A21-1.png"
+    try:
+        response = requests.get(image_url)
+        if response.status_code == 200:
+            img_data = BytesIO(response.content)
+            img = Image(img_data, width=100, height=60)  # adjust size as needed
+            elements.append(img)
+            elements.append(Spacer(1, 12))
+    except Exception as e:
+        st.error(f"Could not load image from {image_url}: {e}")
+    
+
+
+
+
+
+
     elements.append(Paragraph("Alliance 21 Carbon Emission Calculation", title))
     elements.append(Spacer(1, 16))
 
