@@ -11,6 +11,9 @@ import json
 import pandas as pd
 from excel_to_records import read_manifest_to_records
 from insights import make_insights_from_comparison
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 
 # ---------------------
 # Initialization
@@ -398,12 +401,6 @@ def create_emission_pdf(emissions_result):
     except Exception as e:
         st.error(f"Could not load image from {image_url}: {e}")
     
-
-
-
-
-
-
     elements.append(Paragraph("Alliance 21 Carbon Emission Calculation", title))
     elements.append(Spacer(1, 16))
 
@@ -493,12 +490,17 @@ if "emissions_result" in st.session_state:
                     f"{sector.get('emissions_kg', 0):.2f} kg CO₂"
                 )
 
+    sg_tz = ZoneInfo("Asia/Singapore")
+    now_sg = datetime.now(sg_tz)
+    timestamp = now_sg.strftime("%Y%m%d_%H%M")
+
+
     # 📥 PDF download button (added here)
     pdf_bytes = create_emission_pdf(emissions_result)
     st.download_button(
         label="📥 Download Emission Report (PDF)",
         data=pdf_bytes,
-        file_name="emission_report.pdf",
+        file_name = f"emission_report_{timestamp}.pdf",
         mime="application/pdf"
     )
 
