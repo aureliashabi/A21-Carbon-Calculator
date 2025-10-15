@@ -230,7 +230,7 @@ def enrich_addresses_with_llm(locations: List[str]) -> Dict[str, str]:
         "}\n\n"
         "Locations:\n" + "\n".join(locations)
     )
-    raw = call_llm(prompt, timeout=80)
+    raw = call_llm(prompt, timeout=120)
     try:
         mapping = json.loads(raw)
         for loc in locations:
@@ -238,7 +238,7 @@ def enrich_addresses_with_llm(locations: List[str]) -> Dict[str, str]:
                 mapping[loc] = loc
         return mapping
     except Exception as e:
-        logger.warning(f"Failed to parse LLM enrichment JSON: {e}")
+        #logger.warning(f"Failed to parse LLM enrichment JSON: {e}")
         return {loc: loc for loc in locations}
 
 def normalize_shipment_addresses(shipments: List[Dict]):
@@ -412,7 +412,7 @@ def parse_logistics_data(text: str) -> List[Dict]:
     
     return shipments
 
-def call_llm(prompt: str, timeout: int = 60) -> str:
+def call_llm(prompt: str, timeout: int = 120) -> str:
     """Call the LLM with proper error handling and timeout"""
     try:
         response = requests.post(
@@ -625,7 +625,7 @@ IMPORTANT:
     full_prompt = f"{system_prompt}\n\n{llm_input}"
     
     logger.info("Calling LLM for multi-modal transport analysis...")
-    raw_output = call_llm(full_prompt, timeout=80)
+    raw_output = call_llm(full_prompt, timeout=120)
     
     if not raw_output:
         logger.warning("LLM returned empty response")
@@ -656,7 +656,7 @@ IMPORTANT:
 @app.get("/health")
 def health_check():
     try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        response = requests.get("http://localhost:11434/api/tags", timeout=15)
         models = response.json().get("models", [])
         model_available = any(model["name"] == OLLAMA_MODEL for model in models)
         return {
