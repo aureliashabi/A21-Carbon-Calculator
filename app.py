@@ -128,7 +128,7 @@ st.sidebar.header("🔧 Application Status")
 if "api_status" not in st.session_state:
     with st.spinner("LLM Initializing..."):
         try:
-            status_resp = requests.get("http://localhost:8000/health", timeout=10)
+            status_resp = requests.get("http://localhost:8000/health", timeout=30)
             if status_resp.status_code == 200:
                 status_data = status_resp.json()
                 if status_data.get("status") == "healthy":
@@ -213,7 +213,7 @@ with col1:
                     for s in (r.get("segments") or [])
                     if s.get('from') and s.get('to')
                 ),
-                "Notes": r.get("notes",""),
+                "Delivery To": r.get("notes",""),
             } for r in recs])
             st.dataframe(df_preview, use_container_width=True, hide_index=True)
 
@@ -241,7 +241,7 @@ with col1:
                     resp = requests.post(
                         "http://localhost:8000/extract",
                         json={"text": preprocessed_input},
-                        timeout=60
+                        timeout=90
                     )
                     if resp.status_code == 200:
                         result = resp.json()
@@ -261,48 +261,6 @@ with col1:
                 except Exception as e:
                     st.error(f"Unexpected error: {str(e)}")
                     st.session_state.llm_error = str(e)
-
-# ---------------------
-# Insights panel with a button
-# ---------------------
-# st.subheader("2) Insights (paste your calculator's comparison_table)")
-
-# comp_json_text = st.text_area(
-#     "Paste JSON with comparison_table here",
-#     placeholder='{"comparison_table":[{"reference":"R1","baseline_mode":"air","baseline_kg":264,"alt_scenario":"alt_road","alt_mode":"road","alt_kg":97,"delta_kg":-167,"delta_pct":-63.3}]}',
-#     height=160,
-#     key="comp_json"
-# )
-
-# # ✅ BUTTON #2: Generate Insights
-# if st.button("✨ Generate Insights", use_container_width=True, disabled=(not comp_json_text.strip())):
-#     try:
-#         payload = json.loads(comp_json_text)
-#         comparison_table = payload.get("comparison_table") or payload
-#         out = make_insights_from_comparison(comparison_table, top_n=10, min_pct_saving=0.0)
-#         st.session_state.insights_out = out
-#         st.success("✅ Insights generated.")
-#     except Exception as e:
-#         st.session_state.insights_out = None
-#         st.error(f"Could not generate insights: {e}")
-
-# # Show insights if generated
-# if st.session_state.insights_out:
-#     out = st.session_state.insights_out
-#     ps = out["portfolio_summary"]
-#     c1, c2, c3 = st.columns(3)
-#     c1.metric("Baseline total (kg CO₂e)", f"{ps['total_baseline_kg']:,.3f}")
-#     c2.metric("Best-case total (kg CO₂e)", f"{ps['total_bestcase_kg']:,.3f}")
-#     c3.metric("Portfolio Δ", f"{ps['portfolio_delta_kg']:,.3f}", f"{ps['portfolio_delta_pct']:.1f}%")
-
-#     st.markdown("Insights")
-#     for line in out["insights_text"]:
-#         st.write("•", line)
-
-#     tops = out["top_opportunities"]
-#     if isinstance(tops, pd.DataFrame) and not tops.empty:
-#         st.markdown("Top opportunities")
-#         st.dataframe(tops, use_container_width=True, hide_index=True)
 
 # ---------------------
 # Display parsed shipments
@@ -360,7 +318,7 @@ if "parsed_shipments" in st.session_state and st.session_state.parsed_shipments:
                     "road_subtype": road_subtype,
                     "air_subtype": air_subtype
                 },
-                timeout=60
+                timeout=90
             )
             if calc_resp.status_code == 200:
                 st.session_state.emissions_result = calc_resp.json()
@@ -374,12 +332,12 @@ if "parsed_shipments" in st.session_state and st.session_state.parsed_shipments:
         except Exception as e:
             st.error(f"Emission calc error: {e}")
 
-def create_emission_pdf(emissions_result):
+def create_emission_pdf(emissions_result, parsed_shipments=None):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=36, rightMargin=36, topMargin=48, bottomMargin=48  # comfortable margins
+        leftMargin=36, rightMargin=36, topMargin=48, bottomMargin=48
     )
     styles = getSampleStyleSheet()
     normal = styles['Normal']
@@ -388,14 +346,13 @@ def create_emission_pdf(emissions_result):
 
     elements = []
 
-    ## Darius Edit
-
-    image_url = "https://alex.world/wp-content/uploads/2002/10/A21-1.png"
+    # Logo
+    image_url = "https://alex.world/wp-content/themes/alexworld/images/a21-logo.png"
     try:
         response = requests.get(image_url)
         if response.status_code == 200:
             img_data = BytesIO(response.content)
-            img = Image(img_data, width=100, height=60)  # adjust size as needed
+            img = Image(img_data, width=300, height=70)
             elements.append(img)
             elements.append(Spacer(1, 12))
     except Exception as e:
@@ -404,16 +361,48 @@ def create_emission_pdf(emissions_result):
     elements.append(Paragraph("Alliance 21 Carbon Emission Calculation", title))
     elements.append(Spacer(1, 16))
 
+    # Create a mapping from ref_no to origin/destination from parsed_shipments
+    shipment_info_map = {}
+    if parsed_shipments:
+        for shipment in parsed_shipments:
+            ref_no = shipment.get('ref_no', '')
+            origin = shipment.get('origin', '')
+            destination = shipment.get('destination', '')
+            if ref_no:
+                shipment_info_map[ref_no] = {
+                    'origin': origin,
+                    'destination': destination
+                }
+
     for shipment in emissions_result.get("emission_results", []):
         ref_no = shipment.get("ref_no", "N/A")
         total = shipment.get("total_emissions_kg", 0.0)
 
+        # Get origin/destination from the mapping or from shipment data
+        origin = ""
+        destination = ""
+        
+        # Try to get from the mapping first
+        if ref_no in shipment_info_map:
+            origin = shipment_info_map[ref_no].get('origin', '')
+            destination = shipment_info_map[ref_no].get('destination', '')
+        else:
+            # Fallback to shipment data if available
+            origin = shipment.get("origin") or ""
+            destination = shipment.get("destination") or ""
+
         elements.append(Paragraph(f"Shipment: {ref_no}", h2))
         elements.append(Spacer(1, 6))
-        elements.append(Paragraph(f"Total Scope 1 Emission: {total:.2f} kg CO2", normal))
+        elements.append(Paragraph(f"Total Scope 1 Emission: {total:.2f}kg CO2", normal))
+
+        # Add Origin → Destination line if available
+        if origin or destination:
+            route_text = f"Origin and Destination: {origin} → {destination}" if origin and destination else f"Location: {origin or destination}"
+            elements.append(Paragraph(route_text, normal))
+
         elements.append(Spacer(1, 12))
 
-        # Table data (use Paragraph for wrapped text)
+        # Table data
         data = [["Sector", "Type", "Location", "Distance", "Rate", "Emission"]]
         for s in shipment.get("by_sector", []):
             loc_para = Paragraph(f"{s.get('from','')} → {s.get('to','')}", normal)
@@ -423,37 +412,32 @@ def create_emission_pdf(emissions_result):
                 loc_para,
                 f"{(s.get('distance_km') or 0):.1f} km",
                 f"{s.get('emission_factor', 0):.2f} kg/t·km",
-                f"{s.get('emissions_kg', 0):.2f} kg CO2"
+                f"{s.get('emissions_kg', 0):.2f}kg"
             ])
 
-        # Wider Location column; generous paddings so text doesn’t kiss the grid
         table = Table(
             data,
             colWidths=[45, 60, 250, 65, 70, 70]
         )
         table.setStyle(TableStyle([
-            # header
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR',  (0, 0), (-1, 0), colors.whitesmoke),
             ('FONTNAME',   (0, 0), (-1, 0), 'Helvetica-Bold'),
             ('ALIGN',      (0, 0), (-1, 0), 'CENTER'),
             ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-
-            # body
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('VALIGN', (0, 1), (-1, -1), 'MIDDLE'),
-            ('ALIGN',  (0, 1), (1, -1), 'CENTER'),   # Sector, Type center
-            ('ALIGN',  (3, 1), (-1, -1), 'CENTER'),  # numeric cols center
-            ('ALIGN',  (2, 1), (2, -1), 'LEFT'),     # Location left
+            ('ALIGN',  (0, 1), (1, -1), 'CENTER'),
+            ('ALIGN',  (3, 1), (-1, -1), 'CENTER'),
+            ('ALIGN',  (2, 1), (2, -1), 'LEFT'),
             ('LEFTPADDING',  (0, 0), (-1, -1), 8),
             ('RIGHTPADDING', (0, 0), (-1, -1), 8),
             ('TOPPADDING',   (0, 0), (-1, -1), 6),
             ('BOTTOMPADDING',(0, 0), (-1, -1), 6),
         ]))
         elements.append(table)
-        elements.append(Spacer(1, 24))  # space between shipments
+        elements.append(Spacer(1, 24))
 
-    # Set PDF metadata to avoid "(anonymous)"
     def _set_meta(canvas, _doc):
         canvas.setAuthor("Alliance 21")
         canvas.setTitle("Alliance 21 Carbon Emission Calculation")
@@ -469,12 +453,23 @@ def create_emission_pdf(emissions_result):
 # ---------------------
 # Display Emissions Results
 # ---------------------
+
 if "emissions_result" in st.session_state:
     emissions_result = st.session_state.emissions_result
     st.subheader("📊 Carbon Calculation Results")
+
+    sg_tz = ZoneInfo("Asia/Singapore")
+    now_sg = datetime.now(sg_tz)
+    timestamp = now_sg.strftime("%Y%m%d_%H%M")
+
     for shipment in emissions_result.get("emission_results", []):
-        with st.expander(f"Shipment: {shipment.get('ref_no', 'N/A')}"):
+        ref_no = shipment.get("ref_no", "N/A")
+
+        with st.expander(f"Shipment: {ref_no}"):
+            # Display key summary info
             st.metric("Total Emissions", f"{shipment.get('total_emissions_kg', 0):.2f} kg CO₂")
+
+            # List all sectors for this shipment
             for sector in shipment.get("by_sector", []):
                 extra = ""
                 if sector.get("mode") in ("AIR", "SEA"):
@@ -490,73 +485,19 @@ if "emissions_result" in st.session_state:
                     f"{sector.get('emissions_kg', 0):.2f} kg CO₂"
                 )
 
-    sg_tz = ZoneInfo("Asia/Singapore")
-    now_sg = datetime.now(sg_tz)
-    timestamp = now_sg.strftime("%Y%m%d_%H%M")
+            # --- Generate PDF for this specific shipment only ---
+            # Pass the parsed_shipments to the PDF function
+            single_result = {"emission_results": [shipment]}
+            pdf_bytes = create_emission_pdf(single_result, st.session_state.get("parsed_shipments"))
 
-
-    # 📥 PDF download button (added here)
-    pdf_bytes = create_emission_pdf(emissions_result)
-    st.download_button(
-        label="📥 Download Emission Report (PDF)",
-        data=pdf_bytes,
-        file_name = f"emission_report_{timestamp}.pdf",
-        mime="application/pdf"
-    )
-
-    #st.subheader("Raw JSON Output")
-    #st.json(emissions_result)
-
-    # ---------------------
-    # Insights panel with a button
-    # ---------------------
-    st.subheader("Insights (paste your calculator's comparison_table)")
-
-    comp_json_text = st.text_area(
-        "Paste JSON with comparison_table here",
-        placeholder='{"comparison_table":[{"reference":"R1","baseline_mode":"air","baseline_kg":264,"alt_scenario":"alt_road","alt_mode":"road","alt_kg":97,"delta_kg":-167,"delta_pct":-63.3}]}',
-        height=160,
-        key="comp_json"
-    )
-
-    # Generate Insights
-    if st.button("✨ Generate Insights", use_container_width=True, disabled=(not comp_json_text.strip())):
-        try:
-            payload = json.loads(comp_json_text)
-            comparison_table = payload.get("comparison_table") or payload
-            out = make_insights_from_comparison(comparison_table, top_n=10, min_pct_saving=0.0)
-            st.session_state.insights_out = out
-            st.success("✅ Insights generated.")
-        except Exception as e:
-            st.session_state.insights_out = None
-            st.error(f"Could not generate insights: {e}")
-
-    # Show insights if generated
-    if st.session_state.insights_out:
-        out = st.session_state.insights_out
-        ps = out["portfolio_summary"]
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Baseline total (kg CO₂e)", f"{ps['total_baseline_kg']:,.3f}")
-        c2.metric("Best-case total (kg CO₂e)", f"{ps['total_bestcase_kg']:,.3f}")
-        c3.metric("Portfolio Δ", f"{ps['portfolio_delta_kg']:,.3f}", f"{ps['portfolio_delta_pct']:.1f}%")
-
-        st.markdown("Insights")
-        for line in out["insights_text"]:
-            st.write("•", line)
-
-        tops = out["top_opportunities"]
-        if isinstance(tops, pd.DataFrame) and not tops.empty:
-            st.markdown("Top opportunities")
-            st.dataframe(tops, use_container_width=True, hide_index=True)
-
-
-
-# # ---------------------
-# # LLM Analysis
-# # ---------------------
-# if "llm_analysis" in st.session_state and st.session_state.llm_analysis:
-#     st.subheader("🤖 LLM Analysis")
-#     st.text_area("Analysis Result", st.session_state.llm_analysis, height=300)
+            # One PDF button per shipment
+            st.download_button(
+                label=f"📥 Download Report for {ref_no}",
+                data=pdf_bytes,
+                file_name=f"emission_report_{ref_no}_{timestamp}.pdf",
+                mime="application/pdf",
+                key=f"download_{ref_no}"
+            )
 
 # ---------------------
 # Sidebar - Clear Data & Footer
@@ -582,7 +523,7 @@ footer_html = """
     text-align: left;
 ">
 Alliance 21 Carbon Calculator v1.0<br>
-Built by: Adeline, Darius, Sian Yin, Zi Feng
+Built by: Darius, Zi Feng, Sian Yin, Adeline
 </div>
 """
 st.sidebar.markdown(footer_html, unsafe_allow_html=True)
@@ -593,5 +534,4 @@ st.sidebar.info("""
 2. OR paste logistics data in the text area
 3. Click 'Send to LLM' to calculate emissions
 4. Adjust emission inputs as needed and click 'Calculate Scope 1 Emissions'
-5. Paste calculator 'comparison_table' JSON and click **Generate Insights**
 """)
