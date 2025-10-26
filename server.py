@@ -19,7 +19,6 @@ import pandas as pd
 from fastapi import UploadFile, File
 
 from excel_to_records import read_manifest_to_records
-from insights import make_insights_from_comparison
 
 # --- Geo helpers (uses geopy with Google Geocoding fallback) ---
 try:

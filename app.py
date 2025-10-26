@@ -12,7 +12,6 @@ from io import BytesIO
 import json
 import pandas as pd
 from excel_to_records import read_manifest_to_records
-from insights import make_insights_from_comparison
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -180,8 +179,6 @@ if "prompt_text" not in st.session_state:
     st.session_state.prompt_text = ""         
 if "last_parsed_excel" not in st.session_state:
     st.session_state.last_parsed_excel = None 
-if "insights_out" not in st.session_state:
-    st.session_state.insights_out = None     
 
 # ---------------------
 # Main Application
@@ -521,6 +518,13 @@ if "emissions_result" in st.session_state:
                 mime="application/pdf",
                 key=f"download_{ref_no}"
             )
+    consolidated_pdf = create_emission_pdf(emissions_result)
+    st.download_button(
+        label="📥 Download Consolidated Emission Report (All Shipments)", 
+        data=consolidated_pdf, 
+        file_name="consolidated_emission_report.pdf", 
+        mime="application/pdf", 
+        key="download_consolidated_pdf")
 
 # ---------------------
 # Sidebar - Clear Data & Footer
@@ -528,7 +532,7 @@ if "emissions_result" in st.session_state:
 if st.sidebar.button("🗑️ Clear All Data", type="secondary"):
     for key in [
         'parsed_shipments', 'llm_analysis', 'emissions_result', 'llm_error',
-        'prompt_text', 'last_parsed_excel', 'insights_out', 'comp_json'
+        'prompt_text', 'last_parsed_excel','comp_json'
     ]:
         if key in st.session_state:
             del st.session_state[key]
