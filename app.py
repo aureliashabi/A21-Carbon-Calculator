@@ -6,6 +6,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 import io
+import os
+from pathlib import Path
 from io import BytesIO
 import json
 import pandas as pd
@@ -20,7 +22,7 @@ from zoneinfo import ZoneInfo
 # ---------------------
 
 st.set_page_config(page_title="Alliance 21 - Carbon Calculator", layout="wide")
-st.title("Alliance 21 - Carbon Calculator")
+st.markdown( "<h1 style='margin-bottom:-10px;'>AI Carbon Emission Calculator</h1>" "<p>Automated Data Entry | LLM Inference | Custom Calculation Algorithm | Emission Report</p>", unsafe_allow_html=True )
 
 # Hide default Streamlit elements
 hide_streamlit_style = """
@@ -30,6 +32,9 @@ hide_streamlit_style = """
     .stStatusWidget {display: none;}
     .stDeployButton {display: none;}
     header {visibility: hidden;}
+    [data-testid="stHeaderActionElements"] {
+        display: none;
+    }
     </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
@@ -123,7 +128,25 @@ def _compose_prefill_lines(records: list[dict]) -> str:
 # ---------------------
 # Sidebar - API Status
 # ---------------------
-st.sidebar.header("🔧 Application Status")
+
+
+# I add logo cause im bougee like that
+home = Path.home()
+desktop_path = home / "Desktop"
+onedrive_desktop_path = home / "OneDrive" / "Desktop"
+base_desktop = onedrive_desktop_path if onedrive_desktop_path.exists() else desktop_path
+
+logo_folder = base_desktop / "A21 CarbonCalc" / "logo"
+a21_logo_path = logo_folder / "a21-logo.png"
+
+st.sidebar.image(
+    str(a21_logo_path),
+    width=300
+)
+
+### Logo End
+
+st.sidebar.header("Application Status")
 
 if "api_status" not in st.session_state:
     with st.spinner("LLM Initializing..."):
@@ -169,11 +192,11 @@ with col1:
 
     # ---------------------
     # ZF Excel Upload Section START
-    st.subheader("Upload Excel or Enter Shipment Detail Manually")
+    st.subheader("Upload Excel or Enter Shipment Detail Manually", anchor=None)
     excel_file = st.file_uploader("Drop your Excel here", type=["xlsx","xls"], key="manifest_file")
 
     # ✅ BUTTON #1: Add Excel (parse & prefill)
-    if st.button("📥 Add Excel (parse & prefill)", use_container_width=True, disabled=(excel_file is None)):
+    if st.button("Add Excel (parse & prefill)", use_container_width=True, disabled=(excel_file is None)):
         if excel_file is None:
             st.warning("Please choose an Excel file first.")
         else:
@@ -286,9 +309,9 @@ if "parsed_shipments" in st.session_state and st.session_state.parsed_shipments:
                 )
 
     st.markdown("---")
-    st.subheader("⚖️ Emission Inputs")
+    st.subheader("Emission Inputs")
 
-    weight_kg = st.number_input("Shipment weight (kg)", min_value=1, value=400, step=10, key="weight_input")
+    weight_kg = st.number_input("Shipment weight (kg)", min_value=1, value=10, step=10, key="weight_input")
 
     colA, colB = st.columns(2)
     with colA:
